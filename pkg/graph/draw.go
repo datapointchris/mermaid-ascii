@@ -243,6 +243,33 @@ func (g *graph) drawLine(d *drawing, from drawingCoord, to drawingCoord, offsetF
 
 // Draw lays out and renders a parsed graph as text.
 func Draw(properties *Properties) string {
+	s, _ := DrawWithFindings(properties)
+	return s
+}
+
+// DrawWithFindings renders a parsed graph and lists the places its layout
+// could be misread, as layoutFindings describes them.
+func DrawWithFindings(properties *Properties) (string, []string) {
+	attempt := layOut(properties)
+	d := attempt.d
+	if properties.ShowCoords {
+		d = d.debugDrawingWrapper()
+		d = d.debugCoordWrapper(*attempt.g)
+	}
+	findings := make([]string, len(attempt.findings))
+	for i, f := range attempt.findings {
+		findings[i] = f.text
+	}
+	return drawingToString(d), findings
+}
+
+type layoutAttempt struct {
+	g        *graph
+	d        *drawing
+	findings []layoutFinding
+}
+
+func layOut(properties *Properties) layoutAttempt {
 	g := mkGraph(properties.data, properties.nodeSpecs)
 	g.setStyleClasses(properties)
 	g.paddingX = properties.paddingX
@@ -251,12 +278,7 @@ func Draw(properties *Properties) string {
 	g.setSubgraphs(properties.subgraphs)
 	g.createMapping()
 	d := g.draw()
-	if properties.ShowCoords {
-		d = d.debugDrawingWrapper()
-		d = d.debugCoordWrapper(g)
-	}
-	s := drawingToString(d)
-	return s
+	return layoutAttempt{g: &g, d: d, findings: g.layoutFindings()}
 }
 
 func drawBox(n *node, g graph) *drawing {

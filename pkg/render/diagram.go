@@ -63,8 +63,9 @@ func (sd *SequenceDiagram) Type() string {
 }
 
 type GraphDiagram struct {
-	properties  *graph.Properties
-	widthStatus WidthStatus
+	properties     *graph.Properties
+	widthStatus    WidthStatus
+	layoutWarnings []string
 }
 
 func (gd *GraphDiagram) Parse(input string) error {
@@ -87,7 +88,7 @@ func (gd *GraphDiagram) Render(config *diagram.Config) (string, error) {
 
 	gd.widthStatus = WidthStatus{Requested: config.MaxWidth > 0, Limit: config.MaxWidth}
 	gd.properties.Apply(config)
-	output := graph.Draw(gd.properties)
+	output, warnings := graph.DrawWithFindings(gd.properties)
 	gd.widthStatus.Width = displayWidth(output)
 	gd.widthStatus.Met = !gd.widthStatus.Requested || gd.widthStatus.Width <= gd.widthStatus.Limit
 	if gd.widthStatus.Requested && !gd.widthStatus.Met {
@@ -95,13 +96,19 @@ func (gd *GraphDiagram) Render(config *diagram.Config) (string, error) {
 		compactConfig.PaddingBetweenX = 1
 		compactConfig.PaddingBetweenY = 1
 		gd.properties.Apply(&compactConfig)
-		output = graph.Draw(gd.properties)
+		output, warnings = graph.DrawWithFindings(gd.properties)
 		gd.widthStatus.Compacted = true
 		gd.widthStatus.Width = displayWidth(output)
 		gd.widthStatus.Met = gd.widthStatus.Width <= gd.widthStatus.Limit
 	}
 
+	gd.layoutWarnings = warnings
 	return output, nil
+}
+
+// LayoutWarnings lists the places the last render's layout could be misread.
+func (gd *GraphDiagram) LayoutWarnings() []string {
+	return gd.layoutWarnings
 }
 
 func (gd *GraphDiagram) WidthStatus() WidthStatus {

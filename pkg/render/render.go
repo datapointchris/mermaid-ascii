@@ -22,8 +22,22 @@ func RenderDiagram(input string, config *diagram.Config) (string, error) {
 	return output, err
 }
 
+// Report carries what a render found beside its output: how the graph fit
+// its width, and the places its layout could be misread.
+type Report struct {
+	Width          WidthStatus
+	LayoutWarnings []string
+}
+
 // RenderDiagramWithStatus reports graph width fitting alongside the output.
 func RenderDiagramWithStatus(input string, config *diagram.Config) (string, WidthStatus, error) {
+	output, report, err := RenderDiagramWithReport(input, config)
+	return output, report.Width, err
+}
+
+// RenderDiagramWithReport renders a diagram and reports its width fitting
+// and layout warnings.
+func RenderDiagramWithReport(input string, config *diagram.Config) (string, Report, error) {
 	if config == nil {
 		config = diagram.DefaultConfig()
 	}
@@ -35,29 +49,32 @@ func RenderDiagramWithStatus(input string, config *diagram.Config) (string, Widt
 
 	diag, err := DiagramFactory(input)
 	if err != nil {
-		return "", WidthStatus{}, fmt.Errorf("failed to detect diagram type: %w", err)
+		return "", Report{}, fmt.Errorf("failed to detect diagram type: %w", err)
 	}
 
 	if err := diag.Parse(input); err != nil {
-		return "", WidthStatus{}, fmt.Errorf("failed to parse %s diagram: %w", diag.Type(), err)
+		return "", Report{}, fmt.Errorf("failed to parse %s diagram: %w", diag.Type(), err)
 	}
 
 	output, err := diag.Render(config)
 	if err != nil {
-		return "", WidthStatus{}, fmt.Errorf("failed to render %s diagram: %w", diag.Type(), err)
+		return "", Report{}, fmt.Errorf("failed to render %s diagram: %w", diag.Type(), err)
 	}
 
 	if title != "" {
 		output = title + "\n\n" + output
 	}
 
-	status := WidthStatus{}
+	report := Report{}
 	if provider, ok := diag.(interface{ WidthStatus() WidthStatus }); ok {
-		status = provider.WidthStatus()
-		status.Width = displayWidth(output)
-		status.Met = status.Requested && status.Width <= status.Limit
+		report.Width = provider.WidthStatus()
+		report.Width.Width = displayWidth(output)
+		report.Width.Met = report.Width.Requested && report.Width.Width <= report.Width.Limit
 	}
-	return output, status, nil
+	if provider, ok := diag.(interface{ LayoutWarnings() []string }); ok {
+		report.LayoutWarnings = provider.LayoutWarnings()
+	}
+	return output, report, nil
 }
 
 func displayWidth(output string) int {

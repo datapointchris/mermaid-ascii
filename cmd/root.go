@@ -74,11 +74,15 @@ var rootCmd = &cobra.Command{
 		}
 
 		// Render diagram (automatically detects type)
-		output, widthStatus, err := render.RenderDiagramWithStatus(string(mermaid), config)
+		output, report, err := render.RenderDiagramWithReport(string(mermaid), config)
 		if err != nil {
 			log.Fatal(err)
 		}
 		fmt.Print(output)
+		widthStatus := report.Width
+		for _, warning := range report.LayoutWarnings {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
+		}
 		if widthStatus.Requested && widthStatus.Compacted && widthStatus.Met {
 			fmt.Fprintf(os.Stderr, "note: graph exceeded --max-width %d; used compact spacing (%d columns)\n", widthStatus.Limit, widthStatus.Width)
 		} else if widthStatus.Requested && !widthStatus.Met {
