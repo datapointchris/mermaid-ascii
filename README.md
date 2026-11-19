@@ -1,5 +1,11 @@
 # Mermaid ASCII
 
+> This is a fork of [AlexanderGrooff/mermaid-ascii](https://github.com/AlexanderGrooff/mermaid-ascii).
+> Its flowchart router keeps edges, arrowheads and labels off each other's
+> lines, and it prints a `warning:` line on stderr for each place a dense
+> layout still cannot keep apart. Releases are tagged `<version>-fork.<n>`.
+> Everything else follows upstream.
+
 Render mermaid diagrams in your terminal:
 
 ## Installation
@@ -580,7 +586,7 @@ This results in the following graph:
 We parse a mermaid file into basic components in order to render a grid. The grid is used for mapping purposes, which is eventually converted to a drawing.
 The grid looks a bit like this:
 
-```
+```bash
 There are three grid-points per node, and one in-between nodes.
 These coords don't have to be the same size, as long as they
 can be used for pathing purposes where we convert them to drawing
@@ -632,6 +638,7 @@ Note that with `--coords` enabled, the grid-coords shown show the starting locat
 ## Supported Diagram Types
 
 ### Graphs / Flowcharts ✅
+
 - [x] Graph directions (`graph LR` and `graph TD`)
 - [x] Labelled edges (like `A -->|label| B`)
 - [x] Multiple arrows on one line (like `A --> B --> C`)
@@ -643,6 +650,7 @@ Note that with `--coords` enabled, the grid-coords shown show the starting locat
 - [ ] Diagonal arrows
 
 ### Sequence Diagrams ✅
+
 - [x] Basic message syntax (`A->>B: message`)
 - [x] Solid and dotted arrows, with or without an arrowhead (`->>`, `-->>`, `->`, `-->`)
 - [x] Cross (`-x`, `--x`), async point (`-)`, `--)`) and bidirectional (`<<->>`, `<<-->>`) arrows
@@ -661,6 +669,7 @@ Note that with `--coords` enabled, the grid-coords shown show the starting locat
 - [x] `par`/`and`, `critical`/`option`, `break`, `rect` blocks
 
 ### Entity Relationship Diagrams ✅
+
 - [x] Relationships with all crow's-foot cardinalities (`||--o{`, `}|..|{`, …)
 - [x] Numeric (`1`, `0+`, `1+`) and word (`one or more`, `zero or one`, …) cardinalities
 - [x] Identifying (solid) and non-identifying (dashed) relationships
