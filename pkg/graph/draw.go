@@ -250,7 +250,7 @@ func Draw(properties *Properties) string {
 // DrawWithFindings renders a parsed graph and lists the places its layout
 // could be misread, as layoutFindings describes them.
 func DrawWithFindings(properties *Properties) (string, []string) {
-	attempt := layOut(properties)
+	attempt := bestLayout(properties)
 	d := attempt.d
 	if properties.ShowCoords {
 		d = d.debugDrawingWrapper()
@@ -269,13 +269,16 @@ type layoutAttempt struct {
 	findings []layoutFinding
 }
 
-func layOut(properties *Properties) layoutAttempt {
+// layOut lays the graph out with its edges routed in order, a list of
+// indexes into its edges, or in the order they were written when nil.
+func layOut(properties *Properties, order []int) layoutAttempt {
 	g := mkGraph(properties.data, properties.nodeSpecs)
 	g.setStyleClasses(properties)
 	g.paddingX = properties.paddingX
 	g.paddingY = properties.paddingY
 	g.useAscii = properties.useAscii
 	g.setSubgraphs(properties.subgraphs)
+	g.routeOrder = order
 	g.createMapping()
 	d := g.draw()
 	return layoutAttempt{g: &g, d: d, findings: g.layoutFindings()}

@@ -10,7 +10,7 @@ func TestLayoutFindingsNameEdgesDrawnAsOneLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	attempt := layOut(properties)
+	attempt := layOut(properties, nil)
 	if len(attempt.findings) != 0 {
 		t.Fatalf("separate edges reported findings: %v", attempt.findings)
 	}

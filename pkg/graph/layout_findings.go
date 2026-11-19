@@ -7,7 +7,7 @@ import (
 )
 
 // layoutFinding is one place the drawing could not keep apart, with the
-// edges it names.
+// edges it names, so another layout can route them first.
 type layoutFinding struct {
 	text  string
 	edges []*edge

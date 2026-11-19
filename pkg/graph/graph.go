@@ -32,6 +32,7 @@ type graph struct {
 	portUses         map[gridCoord][]portUse
 	labelCells       map[gridCoord]*edge
 	shareKinds       map[*edge]shareKind
+	routeOrder       []int
 	columnWidth      map[int]int
 	rowHeight        map[int]int
 	styleClasses     map[string]styleClass
@@ -319,7 +320,8 @@ func (g *graph) createMapping() {
 			g.recordFanoutLabelCells(e)
 		}
 	}
-	for _, e := range g.edges {
+	for _, i := range g.routingOrder() {
+		e := g.edges[i]
 		if e.fanout {
 			continue
 		}
