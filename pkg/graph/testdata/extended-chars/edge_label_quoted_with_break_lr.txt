@@ -1,0 +1,17 @@
+paddingX = 2
+paddingY = 1
+graph LR
+  A -->|"first line<br>second line"| B
+  A -->|" padded "| C
+---
+┌───┐                         ┌───┐
+│   │                         │   │
+│ A ├─first─line─second─line─►│ B │
+│   │                         │   │
+└─┬─┘                         └───┘
+  │                                
+  │                           ┌───┐
+  │                           │   │
+  └───────────padded─────────►│ C │
+                              │   │
+                              └───┘

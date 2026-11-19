@@ -261,6 +261,11 @@ func parseStyleClass(matchedLine []string) (styleClass, error) {
 }
 
 func setArrowWithStyle(lhs, rhs []textNode, label string, isBidirectional bool, stroke edgeStroke, head edgeHead, gp *Properties) []textNode {
+	label = strings.TrimSpace(label)
+	if len(label) >= 2 && strings.HasPrefix(label, `"`) && strings.HasSuffix(label, `"`) {
+		label = label[1 : len(label)-1]
+	}
+	label = strings.TrimSpace(edgeLabelBreakPattern.ReplaceAllString(label, " "))
 	log.Debug("Setting arrow from ", lhs, " to ", rhs, " with label ", label)
 	for _, l := range lhs {
 		for _, r := range rhs {

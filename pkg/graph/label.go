@@ -9,6 +9,10 @@ import (
 
 var htmlBreakPattern = regexp.MustCompile(`(?i)<br\s*/?>`)
 
+// edgeLabelBreakPattern matches a break with the spaces around it. An edge
+// label is drawn on one line, so a break becomes a single space.
+var edgeLabelBreakPattern = regexp.MustCompile(`(?i)\s*<br\s*/?>\s*`)
+
 const graphLabelLineGap = 1
 
 type graphLabel struct {
