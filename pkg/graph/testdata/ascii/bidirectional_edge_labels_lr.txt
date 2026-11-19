@@ -4,7 +4,7 @@ B -->|run| A
 ---
 +---+                 +---+
 |   |                 |   |
-| A |-workload-exits->| B |
+| A |-workload exits->| B |
 |   |                 |   |
 +---+                 +---+
   ^                     |  

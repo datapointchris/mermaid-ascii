@@ -532,6 +532,9 @@ func (g *graph) mergeDrawings(baseDrawing *drawing, mergeCoord drawingCoord, dra
 			for y := 0; y < len((*d)[0]); y++ {
 				c := (*d)[x][y]
 				if c != " " {
+					if c == labelBlank {
+						c = " "
+					}
 					currentChar := (*mergedDrawing)[x+mergeCoord.x][y+mergeCoord.y]
 					if !g.useAscii && isJunctionChar(c) && isJunctionChar(currentChar) {
 						(*mergedDrawing)[x+mergeCoord.x][y+mergeCoord.y] = mergeJunctions(currentChar, c)

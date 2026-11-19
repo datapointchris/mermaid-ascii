@@ -6,7 +6,7 @@ graph LR
 ---
 ┌───┐                         ┌───┐
 │   │                         │   │
-│ A ├─first─line─second─line─►│ B │
+│ A ├─first line second line─►│ B │
 │   │                         │   │
 └─┬─┘                         └───┘
   │                                

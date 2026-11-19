@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"fmt"
+	"slices"
 
+	"github.com/mattn/go-runewidth"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -38,6 +39,8 @@ type edge struct {
 	head            edgeHead
 	path            []gridCoord
 	labelLine       []gridCoord
+	labelCell       *gridCoord
+	labelVertical   bool
 	fanout          bool
 	startDir        direction
 	endDir          direction
@@ -47,67 +50,18 @@ func (g *graph) determinePath(e *edge) {
 	key := newEdgePair(e.from.index, e.to.index)
 	duplicateIndex := g.edgeCounts[key]
 
+	pairs := g.sidePairs(e)
+	if e.from == e.to {
+		pairs = slices.DeleteFunc(pairs, func(p sidePair) bool { return p.start == p.end })
+	}
 	if startDir, endDir, ok := g.parallelDirections(e, duplicateIndex); ok {
-		from := e.from.gridCoord.Direction(startDir)
-		to := e.to.gridCoord.Direction(endDir)
-		if path, err := g.getPath(from, to); err == nil {
-			e.startDir = startDir
-			e.endDir = endDir
-			e.path = mergePath(path)
-			g.edgeCounts[key]++
-			return
-		}
+		pairs = append([]sidePair{{startDir, endDir, 0}}, pairs...)
 	}
-
-	// Get both paths and use least amount of steps
-	var preferredPath, alternativePath []gridCoord
-	var from, to gridCoord
-	var err error
-	preferredDir, preferredOppositeDir, alternativeDir, alternativeOppositeDir := g.determineStartAndEndDir(e)
-
-	from = e.from.gridCoord.Direction(preferredDir)
-	to = e.to.gridCoord.Direction(preferredOppositeDir)
-	log.Debugf("Determining preferred path from %v (direction %v) to %v (direction %v)", *e.from, preferredDir, *e.to, preferredOppositeDir)
-
-	// Get preferred path
-	preferredPath, err = g.getPath(from, to)
-	if err != nil {
-		fmt.Printf("Error getting path from %v to %v: %v", from, to, err)
-		// This is a big assumption, but if we can't get the preferred path, we assume the alternative path is better
-		e.startDir = alternativeDir
-		e.endDir = alternativeOppositeDir
-		e.path = alternativePath
-		return
+	if !g.routeEdge(e, pairs) {
+		log.Warnf("No path found from %v to %v", e.from, e.to)
 	}
-	preferredPath = mergePath(preferredPath)
-
-	// Alternative path
-	from = e.from.gridCoord.Direction(alternativeDir)
-	to = e.to.gridCoord.Direction(alternativeOppositeDir)
-	log.Debugf("Determining alternative path from %v (direction %v) to %v (direction %v)", *e.from, alternativeDir, *e.to, alternativeOppositeDir)
-
-	alternativePath, err = g.getPath(from, to)
-	if err != nil {
-		fmt.Printf("Error getting path from %v to %v: %v", from, to, err)
-		e.startDir = preferredDir
-		e.endDir = preferredOppositeDir
-		e.path = preferredPath
-	}
-	alternativePath = mergePath(alternativePath)
-
-	nrStepsPreferred := len(preferredPath)
-	nrStepsAlternative := len(alternativePath)
-	if nrStepsPreferred <= nrStepsAlternative {
-		log.Debugf("Using preferred path with %v steps instead of alternative path with %v steps", nrStepsPreferred, nrStepsAlternative)
-		e.startDir = preferredDir
-		e.endDir = preferredOppositeDir
-		e.path = preferredPath
-	} else {
-		log.Debugf("Using alternative path with %v steps instead of alternative path with %v steps", nrStepsAlternative, nrStepsPreferred)
-		e.startDir = alternativeDir
-		e.endDir = alternativeOppositeDir
-		e.path = alternativePath
-	}
+	log.Debugf("Routed %s -> %s from %v to %v along %v", e.from.name, e.to.name, e.startDir, e.endDir, e.path)
+	g.recordEdgeCells(e)
 	g.edgeCounts[key]++
 }
 
@@ -133,97 +87,95 @@ func (g *graph) parallelDirections(e *edge, duplicateIndex int) (direction, dire
 	return Middle, Middle, false
 }
 
+// determineLabelLine picks the cell on e's path that carries its label. The
+// cell is one no other edge uses, so the label names a single line, and it
+// lies outside every node's border column, since widening that column
+// detaches the box from its ports. The cell's column, and for a vertical
+// run its row, grows to fit the label.
 func (g *graph) determineLabelLine(e *edge) {
-	// What line on the path should the label be placed?
-	lenLabel := len(e.text)
-	if lenLabel == 0 {
+	if e.text == "" || e.fanout || len(e.path) < 2 {
 		return
 	}
-	// Widening a column that is occupied by a node would push that node's
-	// border out, leaving a visible gap between the box and any incoming
-	// arrowhead. Prefer label-line candidates whose target column is a free
-	// edge corridor; only fall back to a node column if no corridor segment
-	// is available.
-	prevStep := e.path[0]
-	var largestLine []gridCoord
-	var largestLineSize int
-	var fallbackLine []gridCoord
-	var fallbackLineSize int
-	for _, step := range e.path[1:] {
-		line := []gridCoord{gridCoord(prevStep), gridCoord(step)}
-		prevStep = step
-		lineWidth := g.calculateLineWidth(line)
-		if g.isNodeColumn(labelMiddleX(line)) {
-			if g.labelBoundsAvailable(e, line) && lineWidth > fallbackLineSize {
-				fallbackLineSize = lineWidth
-				fallbackLine = line
-			}
+	cells := expandPath(e.path)
+	best, bestScore, fallback := -1, 0, -1
+	for i := 1; i < len(cells)-1; i++ {
+		prev, c, next := cells[i-1], cells[i], cells[i+1]
+		vertical := prev.x == c.x && c.x == next.x
+		horizontal := prev.y == c.y && c.y == next.y
+		if !vertical && !horizontal {
 			continue
 		}
-		if g.labelLineAvailable(e, line) && g.labelBoundsAvailable(e, line) {
-			if lineWidth >= lenLabel {
-				largestLine = line
-				break
-			}
-			if lineWidth > largestLineSize {
-				largestLineSize = lineWidth
-				largestLine = line
-			}
+		if fallback < 0 {
+			fallback = i
 		}
-	}
-	if largestLine == nil {
-		// A fan-out can share the first corridor while offering a later
-		// corridor wide enough for a label. Look for a short, unused section
-		// centered on a free column rather than overwriting another label or
-		// widening a node column.
-		for _, line := range g.unusedLabelSubsegments(e) {
-			lineWidth := g.calculateLineWidth(line)
-			if lineWidth >= lenLabel {
-				largestLine = line
-				break
-			}
-			if lineWidth > largestLineSize {
-				largestLineSize = lineWidth
-				largestLine = line
-			}
-		}
-	}
-	if largestLine == nil {
-		largestLine = fallbackLine
-	}
-	if largestLine == nil {
-		// Path only had a single segment that lives on a node column; use it
-		// rather than dropping the label entirely.
-		largestLine = []gridCoord{e.path[0], e.path[1]}
-	}
-
-	middleX := labelMiddleX(largestLine)
-	labelPadding := labelPaddingForEdge(e)
-	log.Debugf("Increasing column width for column %v from size %v to %v", middleX, g.columnWidth[middleX], lenLabel+labelPadding)
-	g.columnWidth[middleX] = Max(g.columnWidth[middleX], lenLabel+labelPadding)
-	g.ensureLabelLineClear(e, largestLine)
-	log.Debugf("New column sizes: %v", g.columnWidth)
-	e.labelLine = largestLine
-}
-
-func labelMiddleX(line []gridCoord) int {
-	minX, maxX := line[0].x, line[1].x
-	if minX > maxX {
-		minX, maxX = maxX, minX
-	}
-	return minX + (maxX-minX)/2
-}
-
-func (g *graph) labelLineAvailable(edge *edge, line []gridCoord) bool {
-	for _, other := range g.edges {
-		if other == edge || len(other.labelLine) == 0 {
+		if !g.labelCellFree(e, c, vertical) {
 			continue
 		}
-		if labelsOverlap(g, edge, line, other) {
-			return false
+		score := 0
+		if vertical != (g.graphDirection == "TD") {
+			score++
+		}
+		if g.isNodeColumn(c.x) {
+			score += 2
+		}
+		if vertical && g.isNodeRow(c.y) {
+			score += 2
+		}
+		if best < 0 || score < bestScore {
+			best, bestScore = i, score
 		}
 	}
-	return true
+	if best < 0 && e.labelCell != nil {
+		g.labelCells[*e.labelCell] = e
+		return
+	}
+	if best < 0 {
+		log.Debugf("No free cell for the label %q from %v to %v", e.text, e.from, e.to)
+		best = fallback
+	}
+	if best < 0 {
+		best = 1
+	}
+	c := cells[best]
+	e.labelCell = &c
+	e.labelVertical = cells[best-1].x == c.x
+	g.labelCells[c] = e
+}
+
+// relocateSharedLabels moves each label whose cell an edge routed after it
+// came to share, onto a cell of its own path that no other edge uses.
+func (g *graph) relocateSharedLabels() {
+	for _, e := range g.edges {
+		if e.fanout || e.labelCell == nil || !g.cellShared(e, *e.labelCell) {
+			continue
+		}
+		delete(g.labelCells, *e.labelCell)
+		g.determineLabelLine(e)
+	}
+}
+
+func (g *graph) sizeLabelCell(e *edge) {
+	if e.fanout || e.labelCell == nil {
+		return
+	}
+	c := *e.labelCell
+	width := runewidth.StringWidth(e.text)
+	if !g.isNodeBorderColumn(c.x) {
+		if e.labelVertical {
+			g.columnWidth[c.x] = Max(g.columnWidth[c.x], width+2)
+		} else {
+			g.columnWidth[c.x] = Max(g.columnWidth[c.x], width+labelPaddingForEdge(e))
+		}
+	}
+	if e.labelVertical && !g.isNodeBorderRow(c.y) {
+		g.rowHeight[c.y] = Max(g.rowHeight[c.y], 3)
+	}
+}
+
+func rangesOverlap(firstStart, firstEnd, secondStart, secondEnd int) bool {
+	firstMin, firstMax := Min(firstStart, firstEnd), Max(firstStart, firstEnd)
+	secondMin, secondMax := Min(secondStart, secondEnd), Max(secondStart, secondEnd)
+	return firstMin <= secondMax && secondMin <= firstMax
 }
 
 func labelPaddingForEdge(e *edge) int {
@@ -233,192 +185,48 @@ func labelPaddingForEdge(e *edge) int {
 	return 3 // dashes + end arrowhead
 }
 
-// labelBoundsAvailable keeps the label layer from overwriting drawing elements
-// that are not redrawn after labels are merged. It is intentionally based on
-// coordinates rather than glyphs so it also protects non-ASCII arrowheads.
-func (g *graph) labelBoundsAvailable(e *edge, line []gridCoord) bool {
-	drawingLine := g.lineToDrawing(line)
-	if e.isBidirectional {
-		drawingLine = insetLine(drawingLine, 2, 2)
-	} else {
-		drawingLine = insetLine(drawingLine, 1, 2)
-	}
-	start, end, y := labelBounds(drawingLine, e.text)
-	for _, other := range g.edges {
-		if len(other.path) < 2 || other.head == headNone {
-			continue
-		}
-		arrow := g.arrowheadPosition(other)
-		if arrow.y == y && rangesOverlap(start, end, arrow.x, arrow.x) {
-			return false
-		}
-		if other.isBidirectional {
-			arrow = g.arrowheadPositionFromStart(other)
-			if arrow.y == y && rangesOverlap(start, end, arrow.x, arrow.x) {
-				return false
-			}
-		}
-	}
-	for _, n := range g.nodes {
-		if g.labelOverlapsNodeBorder(n, start, end, y) {
-			return false
-		}
-	}
-	return true
-}
-
-func (g *graph) arrowheadPosition(e *edge) drawingCoord {
-	last := g.gridToDrawingCoord(e.path[len(e.path)-1], nil)
-	if len(e.path) < 2 {
-		return last
-	}
-	previous := g.gridToDrawingCoord(e.path[len(e.path)-2], nil)
-	dir := determineDirection(genericCoord(previous), genericCoord(last))
-	dx, dy := drawingStep(dir)
-	return drawingCoord{x: last.x - dx, y: last.y - dy}
-}
-
-func (g *graph) arrowheadPositionFromStart(e *edge) drawingCoord {
-	first := g.gridToDrawingCoord(e.path[0], nil)
-	if len(e.path) < 2 {
-		return first
-	}
-	next := g.gridToDrawingCoord(e.path[1], nil)
-	dir := determineDirection(genericCoord(next), genericCoord(first))
-	dx, dy := drawingStep(dir)
-	return drawingCoord{x: first.x - dx, y: first.y - dy}
-}
-
-func drawingStep(dir direction) (int, int) {
-	switch dir {
-	case Up:
-		return 0, -1
-	case Down:
-		return 0, 1
-	case Left:
-		return -1, 0
-	case Right:
-		return 1, 0
-	}
-	return 0, 0
-}
-
-func (g *graph) labelOverlapsNodeBorder(n *node, start, end, y int) bool {
-	if n.gridCoord == nil {
-		return false
-	}
-	from := g.gridToDrawingCoord(*n.gridCoord, nil)
-	to := drawingCoord{
-		x: from.x + g.columnWidth[n.gridCoord.x] + g.columnWidth[n.gridCoord.x+1],
-		y: from.y + g.rowHeight[n.gridCoord.y] + g.rowHeight[n.gridCoord.y+1],
-	}
-	if y != from.y && y != to.y {
-		return false
-	}
-	return rangesOverlap(start, end, from.x, to.x)
-}
-
-// ensureLabelLineClear relocates a label corridor only when its rendered
-// bounds would touch a node border or arrowhead. Increasing the gap's grid
-// dimension preserves the existing path and leaves normal-spacing layouts
-// unchanged.
-func (g *graph) ensureLabelLineClear(e *edge, line []gridCoord) {
-	for attempt := 0; attempt < 8 && !g.labelBoundsAvailable(e, line); attempt++ {
-		dir := determineDirection(genericCoord(line[0]), genericCoord(line[1]))
-		switch dir {
-		case Down:
-			g.rowHeight[line[0].y+1] += 2
-		case Up:
-			g.rowHeight[line[0].y-1] += 2
-		case Right:
-			g.columnWidth[line[0].x+1] += 2
-		case Left:
-			g.columnWidth[line[0].x-1] += 2
-		default:
-			return
-		}
-	}
-}
-
-func labelsOverlap(g *graph, firstEdge *edge, firstLine []gridCoord, secondEdge *edge) bool {
-	firstDrawingLine := g.lineToDrawing(firstLine)
-	secondDrawingLine := g.lineToDrawing(secondEdge.labelLine)
-	if firstEdge.isBidirectional {
-		firstDrawingLine = insetLine(firstDrawingLine, 2, 2)
-	} else {
-		firstDrawingLine = insetLine(firstDrawingLine, 1, 2)
-	}
-	if secondEdge.isBidirectional {
-		secondDrawingLine = insetLine(secondDrawingLine, 2, 2)
-	} else {
-		secondDrawingLine = insetLine(secondDrawingLine, 1, 2)
-	}
-	firstStart, firstEnd, firstY := labelBounds(firstDrawingLine, firstEdge.text)
-	secondStart, secondEnd, secondY := labelBounds(secondDrawingLine, secondEdge.text)
-	return firstY == secondY && rangesOverlap(firstStart, firstEnd, secondStart, secondEnd)
-}
-
-func labelBounds(line []drawingCoord, label string) (int, int, int) {
-	middleX := line[0].x + (line[1].x-line[0].x)/2
-	middleY := line[0].y + (line[1].y-line[0].y)/2
-	start := middleX - len(label)/2
-	return start, start + len(label) - 1, middleY
-}
-
-func rangesOverlap(firstStart, firstEnd, secondStart, secondEnd int) bool {
-	firstMin, firstMax := firstStart, firstEnd
-	if firstMin > firstMax {
-		firstMin, firstMax = firstMax, firstMin
-	}
-	secondMin, secondMax := secondStart, secondEnd
-	if secondMin > secondMax {
-		secondMin, secondMax = secondMax, secondMin
-	}
-	return firstMin <= secondMax && secondMin <= firstMax
-}
-
-func (g *graph) unusedLabelSubsegments(edge *edge) [][]gridCoord {
-	var segments [][]gridCoord
-	for i, start := range edge.path[:len(edge.path)-1] {
-		end := edge.path[i+1]
-		if start.y != end.y || start.x == end.x {
-			continue
-		}
-		minX, maxX := start.x, end.x
-		if minX > maxX {
-			minX, maxX = maxX, minX
-		}
-		for middleX := minX + 1; middleX < maxX; middleX++ {
-			if g.isNodeColumn(middleX) {
-				continue
-			}
-			line := []gridCoord{{x: middleX - 1, y: start.y}, {x: middleX + 1, y: start.y}}
-			if g.labelLineAvailable(edge, line) && g.labelBoundsAvailable(edge, line) {
-				segments = append(segments, line)
-			}
-		}
-	}
-	return segments
-}
-
-// isNodeColumn reports whether grid column x is occupied by any node.
-// Widening such a column distorts the box that owns it.
-func (g *graph) isNodeColumn(x int) bool {
-	for _, n := range g.nodes {
-		if n.gridCoord == nil {
-			continue
-		}
-		if x >= n.gridCoord.x && x <= n.gridCoord.x+2 {
+// cellShared reports whether any edge other than e runs through c.
+func (g *graph) cellShared(e *edge, c gridCoord) bool {
+	for _, use := range g.cellUses[c] {
+		if use.e != e {
 			return true
 		}
 	}
 	return false
 }
 
-func (g graph) calculateLineWidth(line []gridCoord) int {
-	totalSize := 0
-	for _, c := range line {
-		totalSize += g.columnWidth[c.x]
+func (g *graph) isNodeColumn(x int) bool {
+	for _, n := range g.nodes {
+		if n.gridCoord != nil && x >= n.gridCoord.x && x <= n.gridCoord.x+2 {
+			return true
+		}
 	}
-	return totalSize
+	return false
+}
+
+func (g *graph) isNodeRow(y int) bool {
+	for _, n := range g.nodes {
+		if n.gridCoord != nil && y >= n.gridCoord.y && y <= n.gridCoord.y+2 {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *graph) isNodeBorderColumn(x int) bool {
+	for _, n := range g.nodes {
+		if n.gridCoord != nil && (x == n.gridCoord.x || x == n.gridCoord.x+2) {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *graph) isNodeBorderRow(y int) bool {
+	for _, n := range g.nodes {
+		if n.gridCoord != nil && (y == n.gridCoord.y || y == n.gridCoord.y+2) {
+			return true
+		}
+	}
+	return false
 }

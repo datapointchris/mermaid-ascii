@@ -55,10 +55,10 @@ func (g *graph) setColumnWidth(n *node) {
 	}
 
 	// Set padding before node
-	if n.gridCoord.x > 0 {
+	if n.gridCoord.x > gridMargin {
 		g.columnWidth[n.gridCoord.x-1] = g.paddingX // TODO: x2?
 	}
-	if n.gridCoord.y > 0 {
+	if n.gridCoord.y > gridMargin {
 		basePadding := g.paddingY
 
 		// Add extra padding if node is in a subgraph AND has incoming edges from outside
@@ -79,10 +79,10 @@ func (g *graph) setColumnWidth(n *node) {
 func (g *graph) increaseGridSizeForPath(path []gridCoord) {
 	for _, c := range path {
 		if _, exists := g.columnWidth[c.x]; !exists {
-			g.columnWidth[c.x] = g.paddingX / 2
+			g.columnWidth[c.x] = Max(1, g.paddingX/2)
 		}
 		if _, exists := g.rowHeight[c.y]; !exists {
-			g.rowHeight[c.y] = g.paddingY / 2
+			g.rowHeight[c.y] = Max(1, g.paddingY/2)
 		}
 	}
 }
@@ -107,4 +107,25 @@ func (g *graph) reserveSpotInGrid(n *node, requestedCoord *gridCoord) *gridCoord
 	}
 	n.gridCoord = requestedCoord
 	return requestedCoord
+}
+
+// gridMargin is the empty column and row placed before the first node, so
+// an edge can reach the top or left side of a node in the first row or
+// column. It has no width unless a path runs through it.
+const gridMargin = 1
+
+func (g *graph) shiftNodesIntoMargin() {
+	g.grid = make(map[gridCoord]*node)
+	for _, n := range g.nodes {
+		if n.gridCoord == nil {
+			continue
+		}
+		shifted := gridCoord{x: n.gridCoord.x + gridMargin, y: n.gridCoord.y + gridMargin}
+		for x := 0; x < 3; x++ {
+			for y := 0; y < 3; y++ {
+				g.grid[gridCoord{x: shifted.x + x, y: shifted.y + y}] = n
+			}
+		}
+		n.gridCoord = &shifted
+	}
 }

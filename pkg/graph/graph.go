@@ -21,13 +21,6 @@ func (c gridCoord) Equals(other gridCoord) bool {
 func (c drawingCoord) Equals(other drawingCoord) bool {
 	return c.x == other.x && c.y == other.y
 }
-func (g graph) lineToDrawing(line []gridCoord) []drawingCoord {
-	dc := []drawingCoord{}
-	for _, c := range line {
-		dc = append(dc, g.gridToDrawingCoord(c, nil))
-	}
-	return dc
-}
 
 type graph struct {
 	nodes            []*node
@@ -35,6 +28,10 @@ type graph struct {
 	drawing          *drawing
 	grid             map[gridCoord]*node
 	edgeCounts       map[edgePair]int
+	cellUses         map[gridCoord][]cellUse
+	portUses         map[gridCoord][]portUse
+	labelCells       map[gridCoord]*edge
+	shareKinds       map[*edge]shareKind
 	columnWidth      map[int]int
 	rowHeight        map[int]int
 	styleClasses     map[string]styleClass
@@ -78,6 +75,10 @@ func mkGraph(data *orderedmap.OrderedMap[string, []textEdge], nodeSpecs map[stri
 	g := graph{drawing: mkDrawing(0, 0)}
 	g.grid = make(map[gridCoord]*node)
 	g.edgeCounts = make(map[edgePair]int)
+	g.cellUses = make(map[gridCoord][]cellUse)
+	g.portUses = make(map[gridCoord][]portUse)
+	g.labelCells = make(map[gridCoord]*edge)
+	g.shareKinds = make(map[*edge]shareKind)
 	g.columnWidth = make(map[int]int)
 	g.rowHeight = make(map[int]int)
 	g.styleClasses = make(map[string]styleClass)
@@ -306,6 +307,7 @@ func (g *graph) createMapping() {
 		}
 	}
 
+	g.shiftNodesIntoMargin()
 	for _, n := range g.nodes {
 		g.setColumnWidth(n)
 	}
@@ -313,11 +315,21 @@ func (g *graph) createMapping() {
 	g.layoutFanouts()
 	for _, e := range g.edges {
 		if e.fanout {
+			g.recordEdgeCells(e)
+			g.recordFanoutLabelCells(e)
+		}
+	}
+	for _, e := range g.edges {
+		if e.fanout {
 			continue
 		}
 		g.determinePath(e)
 		g.increaseGridSizeForPath(e.path)
 		g.determineLabelLine(e)
+	}
+	g.relocateSharedLabels()
+	for _, e := range g.edges {
+		g.sizeLabelCell(e)
 	}
 
 	// ! Last point before we manipulate the drawing !

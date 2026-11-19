@@ -1,101 +1,12 @@
 package graph
 
 import (
-	"container/heap"
-	"fmt"
 	"slices"
+
+	"github.com/mattn/go-runewidth"
 
 	log "github.com/sirupsen/logrus"
 )
-
-type priorityQueueItem struct {
-	coord    gridCoord
-	priority int
-	index    int
-}
-
-type priorityQueue []*priorityQueueItem
-
-func (pq priorityQueue) Len() int { return len(pq) }
-
-func (pq priorityQueue) Less(i, j int) bool {
-	return pq[i].priority < pq[j].priority
-}
-
-func (pq priorityQueue) Swap(i, j int) {
-	pq[i], pq[j] = pq[j], pq[i]
-	pq[i].index = i
-	pq[j].index = j
-}
-
-func (pq *priorityQueue) Push(x interface{}) {
-	n := len(*pq)
-	item := x.(*priorityQueueItem)
-	item.index = n
-	*pq = append(*pq, item)
-}
-
-func (pq *priorityQueue) Pop() interface{} {
-	old := *pq
-	n := len(old)
-	item := old[n-1]
-	old[n-1] = nil
-	item.index = -1
-	*pq = old[0 : n-1]
-	return item
-}
-
-func heuristic(a, b gridCoord) int {
-	absX := Abs(a.x - b.x)
-	absY := Abs(a.y - b.y)
-	if absX == 0 || absY == 0 {
-		return absX + absY
-	} else {
-		// Punish for taking extra corner, we prefer straight (less complex) lines
-		return absX + absY + 1
-	}
-}
-
-func (g *graph) getPath(from gridCoord, to gridCoord) ([]gridCoord, error) {
-	pq := &priorityQueue{}
-	heap.Init(pq)
-	heap.Push(pq, &priorityQueueItem{coord: from, priority: 0})
-
-	costSoFar := map[gridCoord]int{from: 0}
-	cameFrom := map[gridCoord]*gridCoord{from: nil}
-
-	directions := []gridCoord{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
-
-	for pq.Len() > 0 {
-		current := heap.Pop(pq).(*priorityQueueItem).coord
-
-		if current.Equals(to) {
-			path := []gridCoord{}
-			for c := &current; c != nil; c = cameFrom[*c] {
-				path = append([]gridCoord{*c}, path...)
-			}
-			log.Debugf("Found it! path: %v", path)
-			return path, nil
-		}
-
-		for _, dir := range directions {
-			next := gridCoord{x: current.x + dir.x, y: current.y + dir.y}
-			if !g.isFreeInGrid(next) && !next.Equals(to) {
-				continue
-			}
-
-			newCost := costSoFar[current] + 1
-			if cost, ok := costSoFar[next]; !ok || newCost < cost {
-				costSoFar[next] = newCost
-				priority := newCost + heuristic(next, to)
-				heap.Push(pq, &priorityQueueItem{coord: next, priority: priority})
-				cameFrom[next] = &current
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("no path found")
-}
 
 func (g *graph) isFreeInGrid(c gridCoord) bool {
 	// We'll fix it later if we overshoot the grid size
@@ -191,9 +102,13 @@ func (g *graph) drawPath(e *edge) (*drawing, [][]drawingCoord, []direction) {
 		dir := determineDirection(genericCoord(previousCoord), genericCoord(nextCoord))
 		s := g.drawLine(d, previousDrawingCoord, nextDrawingCoord, 1, -1, stroke)
 		if len(s) == 0 {
-			// drawLine may return no coords if offsets collapse the line. Use at least one point so arrow and junction logic
-			// can still infer a direction.
-			s = append(s, previousDrawingCoord)
+			// drawLine returns no coords when a one-cell corridor leaves no room between the offsets. The first segment
+			// then records the cell past the source border, so drawBoxStart puts its junction on the border itself.
+			if len(linesDrawn) == 0 {
+				s = append(s, nextDrawingCoord)
+			} else {
+				s = append(s, previousDrawingCoord)
+			}
 		}
 		linesDrawn = append(linesDrawn, s)
 		lineDirs = append(lineDirs, dir)
@@ -410,81 +325,74 @@ func (g *graph) drawCorners(e *edge) *drawing {
 
 func (g *graph) drawArrowLabel(e *edge) *drawing {
 	d := copyCanvas(g.drawing)
-	lenLabel := len(e.text)
-	if lenLabel == 0 {
+	if e.text == "" {
 		return d
 	}
-
-	if e.fanout {
+	var start drawingCoord
+	switch {
+	case e.fanout:
 		x, _, y := g.fanoutLabelBounds(e)
-		d.drawText(drawingCoord{x: x, y: y}, e.text)
+		start = drawingCoord{x: x, y: y}
+	case e.labelCell != nil:
+		start = g.labelStart(e)
+	default:
 		return d
 	}
-
-	log.Debugf("Drawing text '%s' on gridline %v", e.text, e.labelLine)
-	line := g.lineToDrawing(e.labelLine)
-	if e.isBidirectional {
-		line = insetLine(line, 2, 2) // reserve for label placement calc: <- (2 char) + {label} + -> (2 char)
-	} else {
-		line = insetLine(line, 1, 2) // reserve for label placement calc: - (1 char) + {label} + -> (2 char)
-	}
-	d.drawTextOnLine(line, e.text)
+	log.Debugf("Drawing text '%s' at %v", e.text, start)
+	d.drawText(start, e.text)
+	markLabelBlanks(d, start, e.text)
 	return d
 }
 
-// insetLine returns a sub-segment with each endpoint moved inward along the line.
-func insetLine(line []drawingCoord, insetStart, insetEnd int) []drawingCoord {
-	if len(line) < 2 || (insetStart == 0 && insetEnd == 0) {
-		return line
+// labelStart centers the label in its cell. On a horizontal run it keeps
+// the text clear of an arrowhead drawn at either end of the cell.
+func (g *graph) labelStart(e *edge) drawingCoord {
+	c := *e.labelCell
+	center := g.gridToDrawingCoord(c, nil)
+	width := runewidth.StringWidth(e.text)
+	start := drawingCoord{x: center.x - width/2, y: center.y}
+	if e.labelVertical {
+		return start
 	}
-	endInset := insetEnd
-	if insetEnd > 0 {
-		endInset = insetEnd - 1 // shift label right ~1 char so the start dash survives the centered placement
+	colStart := center.x - g.columnWidth[c.x]/2
+	colEnd := colStart + g.columnWidth[c.x] - 1
+	left, right := 1, 1
+	cells := expandPath(e.path)
+	for i := 1; i < len(cells)-1; i++ {
+		if !cells[i].Equals(c) {
+			continue
+		}
+		rightward := cells[i+1].x > c.x
+		if i == len(cells)-2 && e.head != headNone {
+			if rightward {
+				right = 2
+			} else {
+				left = 2
+			}
+		}
+		if i == 1 && e.isBidirectional {
+			if rightward {
+				left = 2
+			} else {
+				right = 2
+			}
+		}
 	}
-	dir := determineDirection(genericCoord(line[0]), genericCoord(line[1]))
-	a, b := line[0], line[1]
-	switch dir {
-	case Right:
-		a.x += insetStart
-		b.x -= endInset
-	case Left:
-		a.x -= insetStart
-		b.x += endInset
-	case Down:
-		a.y += insetStart
-		b.y -= endInset
-	case Up:
-		a.y -= insetStart
-		b.y += endInset
-	default:
-		return line
-	}
-	return []drawingCoord{a, b}
+	free := (colEnd - right) - (colStart + left) + 1
+	start.x = colStart + left + Max(0, (free-width)/2)
+	return start
 }
 
-func (d *drawing) drawTextOnLine(line []drawingCoord, label string) {
-	// Write text in middle of the line
-	//  123456789
-	// |---------|
-	//     123
-	log.Debugf("Drawing text '%s' on drawingline %v", label, line)
-	var minX, maxX, minY, maxY int
-	if line[0].x > line[1].x {
-		minX = line[1].x
-		maxX = line[0].x
-	} else {
-		minX = line[0].x
-		maxX = line[1].x
+// labelBlank stands in for a space inside a label until the label layer is
+// merged, so the space covers the line beneath it instead of showing it.
+const labelBlank = "\x00"
+
+func markLabelBlanks(d *drawing, start drawingCoord, text string) {
+	x := start.x
+	for _, cell := range textCells(text) {
+		if cell.text == " " && x >= 0 && x < len(*d) && start.y >= 0 && start.y < len((*d)[x]) {
+			(*d)[x][start.y] = labelBlank
+		}
+		x += cell.width
 	}
-	if line[0].y > line[1].y {
-		minY = line[1].y
-		maxY = line[0].y
-	} else {
-		minY = line[0].y
-		maxY = line[1].y
-	}
-	middleX := minX + (maxX-minX)/2
-	middleY := minY + (maxY-minY)/2
-	startLabelCoord := drawingCoord{x: middleX - len(label)/2, y: middleY}
-	d.drawText(startLabelCoord, label)
 }

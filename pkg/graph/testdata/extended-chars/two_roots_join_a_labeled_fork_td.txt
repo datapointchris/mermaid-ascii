@@ -1,0 +1,28 @@
+paddingX = 2
+paddingY = 1
+graph TD
+  F["manual fix"] --> G["precondition met?"]
+  J["scheduled job"] --> G
+  G -->|yes| E["automatic repair"]
+  G -->|no| P["escalated to a person"]
+  E -->|needs a person| P
+---
+┌───────────────────┐                 ┌───────────────────────┐
+│                   │                 │                       │
+│     manual fix    │        ┌────────┤     scheduled job     │
+│                   │        │        │                       │
+└─────────┬─────────┘        │        └───────────────────────┘
+          ▼──────────────────┘                                 
+┌───────────────────┐                                          
+│                   │                                          
+│ precondition met? ├───────no────────────────────┐            
+│                   │                             │            
+└─────────┬─────────┘                             │            
+          │                                       │            
+         yes                                      │            
+          ▼                                       ▼            
+┌───────────────────┐                 ┌───────────────────────┐
+│                   │                 │                       │
+│  automatic repair ├─needs a person─►│ escalated to a person │
+│                   │                 │                       │
+└───────────────────┘                 └───────────────────────┘
