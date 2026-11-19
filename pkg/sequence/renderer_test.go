@@ -16,6 +16,10 @@ import (
 func getTestDataPath() string {
 	_, filename, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(filename)
+	if !filepath.IsAbs(dir) {
+		// -trimpath records a module-relative path, and go test runs in the package directory.
+		dir = "."
+	}
 	return filepath.Join(dir, "..", "..", "cmd", "testdata")
 }
 
