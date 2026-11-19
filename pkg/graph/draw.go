@@ -129,17 +129,12 @@ func (g *graph) drawLine(d *drawing, from drawingCoord, to drawingCoord, offsetF
 		// dedicated dashed/heavy box-drawing glyphs, so (unlike ASCII) no
 		// skip-cell pattern is needed for dotted; the glyph is dashed on its
 		// own. Horizontal glyph: solid "─", dotted "┄", thick "━".
-		vertical := "│"
-		if stroke == strokeThick {
-			vertical = "┃"
-		} else if stroke == strokeDotted {
-			vertical = "┆"
-		}
-		horizontal := "─"
-		if stroke == strokeThick {
-			horizontal = "━"
-		} else if stroke == strokeDotted {
-			horizontal = "┄"
+		vertical, horizontal := "│", "─"
+		switch stroke {
+		case strokeThick:
+			vertical, horizontal = "┃", "━"
+		case strokeDotted:
+			vertical, horizontal = "┆", "┄"
 		}
 		switch direction {
 		case Up:
@@ -189,15 +184,12 @@ func (g *graph) drawLine(d *drawing, from drawingCoord, to drawingCoord, offsetF
 		// stroke; ASCII has no true double-width vertical). Horizontal
 		// glyph: solid/dotted share "-" (dotted skips every other cell
 		// below), thick "=".
-		vertical := "|"
-		if stroke == strokeThick {
-			vertical = "I"
-		} else if stroke == strokeDotted {
+		vertical, horizontal := "|", "-"
+		switch stroke {
+		case strokeThick:
+			vertical, horizontal = "I", "="
+		case strokeDotted:
 			vertical = ":"
-		}
-		horizontal := "-"
-		if stroke == strokeThick {
-			horizontal = "="
 		}
 		switch direction {
 		case Up:
@@ -449,15 +441,15 @@ func wrapTextInColor(text, c, styleType string) string {
 	if c == "" {
 		return text
 	}
-	if styleType == "html" {
+	switch styleType {
+	case "html":
 		return fmt.Sprintf("<span style='color: %s'>%s</span>", c, text)
-	} else if styleType == "cli" {
+	case "cli":
 		cliColor := color.HEX(c)
 		return cliColor.Sprint(text)
-	} else {
-		log.Warnf("Unknown style type %s", styleType)
-		return text
 	}
+	log.Warnf("Unknown style type %s", styleType)
+	return text
 }
 
 func (d *drawing) increaseSize(x int, y int) {
