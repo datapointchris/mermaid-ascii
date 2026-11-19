@@ -14,12 +14,7 @@ import (
 // resolved from this file's location so tests work from any working directory.
 func erTestDataPath(subdir string) string {
 	_, filename, _, _ := runtime.Caller(0)
-	dir := filepath.Dir(filename)
-	if !filepath.IsAbs(dir) {
-		// -trimpath records a module-relative path, and go test runs in the package directory.
-		dir = "."
-	}
-	return filepath.Join(dir, "..", "..", "cmd", "testdata", subdir)
+	return filepath.Join(filepath.Dir(filename), "..", "..", "cmd", "testdata", subdir)
 }
 
 // verifyErGolden renders the mermaid input from a golden file and compares it

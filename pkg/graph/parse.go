@@ -274,6 +274,10 @@ func setArrowWithLabel(lhs, rhs []textNode, label string, isBidirectional bool, 
 	return setArrowWithStyle(lhs, rhs, label, isBidirectional, strokeSolid, headArrow, gp)
 }
 
+func setArrow(lhs, rhs []textNode, gp *Properties) []textNode {
+	return setArrowWithLabel(lhs, rhs, "", false, gp)
+}
+
 func setBidirectionalArrow(lhs, rhs []textNode, gp *Properties) []textNode {
 	return setArrowWithLabel(lhs, rhs, "", true, gp)
 }
