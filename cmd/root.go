@@ -79,6 +79,9 @@ var rootCmd = &cobra.Command{
 			log.Fatal(err)
 		}
 		fmt.Print(output)
+		if !strings.HasSuffix(output, "\n") {
+			fmt.Println()
+		}
 		widthStatus := report.Width
 		for _, warning := range report.LayoutWarnings {
 			fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
