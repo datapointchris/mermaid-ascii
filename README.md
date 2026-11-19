@@ -586,7 +586,7 @@ This results in the following graph:
 We parse a mermaid file into basic components in order to render a grid. The grid is used for mapping purposes, which is eventually converted to a drawing.
 The grid looks a bit like this:
 
-```bash
+```text
 There are three grid-points per node, and one in-between nodes.
 These coords don't have to be the same size, as long as they
 can be used for pathing purposes where we convert them to drawing
